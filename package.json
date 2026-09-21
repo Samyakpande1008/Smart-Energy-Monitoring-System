@@ -7,7 +7,12 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
-    "format": "oxfmt"
+    "format": "oxfmt",
+    "backend": "node backend/src/server.js",
+    "ml": "python -m uvicorn main:app --host 127.0.0.1 --port 8000 --app-dir ml-service",
+    "simulator": "node simulator/simulator.js",
+    "db:migrate": "node backend/database/migrate.js",
+    "db:seed": "node backend/database/seed.js"
   },
   "dependencies": {
     "lucide-react": "^1.31.0",

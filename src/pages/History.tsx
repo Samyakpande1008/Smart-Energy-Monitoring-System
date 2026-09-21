@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Brain, Plug, AlertTriangle, Zap } from "lucide-react";
-import { historyItems } from "../services/mockData";
+import { historyItems as DEFAULT_HISTORY } from "../services/mockData";
+import { api } from "../services/api";
 
 const FILTERS = ["All", "AI", "Socket", "Auto-OFF", "Alerts"];
 
@@ -17,8 +18,22 @@ const filterKey: Record<string, string> = { All: "", AI: "ai", Socket: "socket",
 
 export default function History() {
   const [filter, setFilter] = useState("All");
+  const [items, setItems] = useState<any[]>(DEFAULT_HISTORY);
 
-  const items = historyItems.filter(h => !filterKey[filter] || h.type === filterKey[filter]);
+  useEffect(() => {
+    let isMounted = true;
+    api.devices.getHistory(1)
+      .then(res => {
+        if (isMounted && res && res.events && res.events.length > 0) {
+          setItems(res.events);
+        }
+      })
+      .catch(() => {});
+
+    return () => { isMounted = false; };
+  }, []);
+
+  const filteredItems = items.filter(h => !filterKey[filter] || h.type === filterKey[filter]);
 
   return (
     <div className="p-4 md:p-6 max-w-3xl mx-auto space-y-6">
@@ -30,16 +45,16 @@ export default function History() {
       <div className="flex flex-wrap gap-2">
         {FILTERS.map(f => (
           <button key={f} onClick={() => setFilter(f)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${filter === f ? "bg-blue-600 text-white border-blue-500" : "text-slate-400 hover:text-white border-transparent hover:border-white/10"}`}>
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border cursor-pointer ${filter === f ? "bg-blue-600 text-white border-blue-500" : "text-slate-400 hover:text-white border-transparent hover:border-white/10"}`}>
             {f}
           </button>
         ))}
       </div>
 
       <div className="space-y-2">
-        {items.map((h) => {
-          const Icon = iconMap[h.icon];
-          const cls = colorMap[h.type];
+        {filteredItems.map((h) => {
+          const Icon = iconMap[h.icon] || Plug;
+          const cls = colorMap[h.type] || colorMap.socket;
           return (
             <div key={h.id} className="flex items-center gap-4 p-4 rounded-xl border hover:border-white/10 transition-colors"
               style={{ background: "var(--card)", borderColor: "var(--border)" }}>
@@ -54,7 +69,7 @@ export default function History() {
             </div>
           );
         })}
-        {items.length === 0 && (
+        {filteredItems.length === 0 && (
           <p className="text-center text-slate-500 text-sm py-12">No events found for this filter.</p>
         )}
       </div>

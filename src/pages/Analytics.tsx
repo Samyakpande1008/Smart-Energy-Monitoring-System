@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { BarChart, Bar, AreaChart, Area, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { generateDailyData, generateHourlyData } from "../services/mockData";
+import { api } from "../services/api";
 
 const FILTERS = ["Today", "Week", "Month", "Custom"];
 
-const daily = generateDailyData(7);
-const hourly = generateHourlyData(24);
-const costData = daily.map(d => ({ ...d, s1Cost: +(d.cost * 0.6).toFixed(0), s2Cost: +(d.cost * 0.4).toFixed(0) }));
+const DEFAULT_DAILY = generateDailyData(7);
+const DEFAULT_HOURLY = generateHourlyData(24);
+const DEFAULT_COST = DEFAULT_DAILY.map(d => ({ ...d, s1Cost: +(d.cost * 0.6).toFixed(0), s2Cost: +(d.cost * 0.4).toFixed(0) }));
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
@@ -31,6 +32,35 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
 
 export default function Analytics() {
   const [filter, setFilter] = useState(0);
+  const [summary, setSummary] = useState({
+    totalEnergy: "18.4 kWh",
+    dailyAverage: "2.63 kWh",
+    peakPower: "198 W",
+    monthlyBill: "₹486",
+    estSavings: "₹72"
+  });
+  const [dailyData, setDailyData] = useState<any[]>(DEFAULT_DAILY);
+  const [hourlyData, setHourlyData] = useState<any[]>(DEFAULT_HOURLY);
+  const [costData, setCostData] = useState<any[]>(DEFAULT_COST);
+
+  useEffect(() => {
+    let isMounted = true;
+    api.devices.getAnalytics(1, filter)
+      .then(res => {
+        if (!isMounted || !res) return;
+        if (res.summary) setSummary(res.summary);
+        if (res.daily && res.daily.length > 0) {
+          setDailyData(res.daily);
+          setCostData(res.daily);
+        }
+        if (res.hourly && res.hourly.length > 0) {
+          setHourlyData(res.hourly);
+        }
+      })
+      .catch(() => {});
+
+    return () => { isMounted = false; };
+  }, [filter]);
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-6">
@@ -42,7 +72,7 @@ export default function Analytics() {
         <div className="flex gap-1 p-1 rounded-xl" style={{ background: "var(--card)" }}>
           {FILTERS.map((f, i) => (
             <button key={f} onClick={() => setFilter(i)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${filter === i ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"}`}>
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${filter === i ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"}`}>
               {f}
             </button>
           ))}
@@ -51,11 +81,11 @@ export default function Analytics() {
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
-          { label: "Total Energy", value: "18.4 kWh", color: "text-cyan-400" },
-          { label: "Daily Average", value: "2.63 kWh", color: "text-blue-400" },
-          { label: "Peak Power", value: "198 W", color: "text-purple-400" },
-          { label: "Monthly Bill", value: "₹486", color: "text-amber-400" },
-          { label: "Est. Savings", value: "₹72", color: "text-emerald-400" },
+          { label: "Total Energy", value: summary.totalEnergy, color: "text-cyan-400" },
+          { label: "Daily Average", value: summary.dailyAverage, color: "text-blue-400" },
+          { label: "Peak Power", value: summary.peakPower, color: "text-purple-400" },
+          { label: "Monthly Bill", value: summary.monthlyBill, color: "text-amber-400" },
+          { label: "Est. Savings", value: summary.estSavings, color: "text-emerald-400" },
         ].map(m => (
           <div key={m.label} className="rounded-2xl border p-4" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
             <p className="text-[10px] text-slate-400 mb-1">{m.label}</p>
@@ -67,7 +97,7 @@ export default function Analytics() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <ChartCard title="Daily Energy Consumption (kWh)">
           <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={daily}>
+            <BarChart data={dailyData}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
               <XAxis dataKey="day" tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
@@ -79,7 +109,7 @@ export default function Analytics() {
 
         <ChartCard title="Power Consumption Over Time (W)">
           <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={hourly.filter((_, i) => i % 2 === 0)}>
+            <AreaChart data={hourlyData.filter((_, i) => i % 2 === 0)}>
               <defs>
                 <linearGradient id="gt" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.25} />
@@ -97,7 +127,7 @@ export default function Analytics() {
 
         <ChartCard title="Socket 1 vs Socket 2">
           <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={daily}>
+            <BarChart data={dailyData}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
               <XAxis dataKey="day" tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} />
