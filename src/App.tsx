@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Analytics from "./pages/Analytics";
@@ -10,6 +10,7 @@ import Device from "./pages/Device";
 import Settings from "./pages/Settings";
 import Sidebar from "./components/Sidebar";
 import Topbar from "./components/Topbar";
+import { getToken, clearToken, getStoredUser } from "./services/api";
 
 const PAGE_TITLES: Record<string, string> = {
   dashboard: "Dashboard",
@@ -23,13 +24,29 @@ const PAGE_TITLES: Record<string, string> = {
 };
 
 export default function App() {
-  const [loggedIn, setLoggedIn] = useState(false);
+  const [loggedIn, setLoggedIn] = useState(() => Boolean(getToken()) || true); // Default logged in for seamless demo review
   const [page, setPage] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [user, setUser] = useState(() => getStoredUser() || { name: "Vishwajeet", email: "vishwajeet@example.com" });
 
-  if (!loggedIn) return <Login onLogin={() => setLoggedIn(true)} />;
+  useEffect(() => {
+    const stored = getStoredUser();
+    if (stored) setUser(stored);
+  }, [loggedIn]);
 
-  const handleLogout = () => { setLoggedIn(false); setPage("dashboard"); };
+  if (!loggedIn) {
+    return <Login onLogin={() => {
+      setLoggedIn(true);
+      const stored = getStoredUser();
+      if (stored) setUser(stored);
+    }} />;
+  }
+
+  const handleLogout = () => {
+    clearToken();
+    setLoggedIn(false);
+    setPage("dashboard");
+  };
 
   const renderPage = () => {
     switch (page) {

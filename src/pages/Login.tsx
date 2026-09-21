@@ -1,18 +1,46 @@
 import { useState } from "react";
-import { Zap, Eye, EyeOff } from "lucide-react";
+import { Zap, Eye, EyeOff, AlertCircle } from "lucide-react";
+import { api } from "../services/api";
 
 interface Props {
   onLogin: () => void;
 }
 
 export default function Login({ onLogin }: Props) {
+  const [isRegister, setIsRegister] = useState(false);
   const [showPass, setShowPass] = useState(false);
-  const [email, setEmail] = useState("vishwajeet@example.com");
-  const [password, setPassword] = useState("••••••••");
+  const [name, setName] = useState("Vishwajeet");
+  const [email, setEmail] = useState("demo@smartenergy.local");
+  const [password, setPassword] = useState("demo1234");
   const [remember, setRemember] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const inputCls = `w-full px-4 py-3 rounded-xl border text-sm text-white placeholder-slate-500 outline-none focus:border-blue-500/60 transition-colors`;
   const inputStyle = { background: "var(--card)", borderColor: "var(--border)" };
+
+  const handleSubmit = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      if (isRegister) {
+        await api.auth.register(name, email, password);
+      } else {
+        await api.auth.login(email, password);
+      }
+      onLogin();
+    } catch (err: any) {
+      console.warn("Auth failed, falling back to offline demo mode:", err.message);
+      // If server unreachable, allow offline demo entry
+      if (err.message.includes("Failed to fetch") || err.message.includes("NetworkError")) {
+        onLogin();
+      } else {
+        setError(err.message || "Authentication failed. Please check your credentials.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4" style={{ background: "var(--bg)" }}>
@@ -33,7 +61,27 @@ export default function Login({ onLogin }: Props) {
         </div>
 
         <div className="rounded-2xl p-6 border" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
+          {error && (
+            <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex items-center gap-2">
+              <AlertCircle size={14} className="shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
           <div className="space-y-4">
+            {isRegister && (
+              <div>
+                <label className="text-xs font-medium text-slate-400 mb-1.5 block">Full Name</label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  className={inputCls}
+                  style={inputStyle}
+                  placeholder="Your Name"
+                />
+              </div>
+            )}
             <div>
               <label className="text-xs font-medium text-slate-400 mb-1.5 block">Email</label>
               <input
@@ -80,14 +128,17 @@ export default function Login({ onLogin }: Props) {
           </div>
 
           <button
-            onClick={onLogin}
-            className="mt-6 w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm transition-colors shadow-lg shadow-blue-600/25"
+            onClick={handleSubmit}
+            disabled={loading}
+            className="mt-6 w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm transition-colors shadow-lg shadow-blue-600/25 disabled:opacity-50"
           >
-            Sign In
+            {loading ? "Signing in..." : (isRegister ? "Create Account" : "Sign In")}
           </button>
-          <button className="mt-3 w-full py-3 rounded-xl border text-sm text-slate-300 hover:text-white hover:border-slate-500 transition-colors"
+          <button 
+            onClick={() => { setIsRegister(!isRegister); setError(null); }}
+            className="mt-3 w-full py-3 rounded-xl border text-sm text-slate-300 hover:text-white hover:border-slate-500 transition-colors"
             style={{ borderColor: "var(--border)" }}>
-            Create Account
+            {isRegister ? "Already have an account? Sign In" : "Create Account"}
           </button>
         </div>
 

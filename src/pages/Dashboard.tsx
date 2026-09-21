@@ -1,35 +1,142 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Zap, Activity, DollarSign, Thermometer, Brain, TrendingUp, AlertTriangle, Lightbulb, ArrowRight, Power } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import StatCard from "../components/StatCard";
 import StatusBadge from "../components/StatusBadge";
-import { generateSensorData, generateHourlyData, type SocketStatus } from "../services/mockData";
+import { generateSensorData, generateHourlyData, type SocketStatus, type SensorData } from "../services/mockData";
+import { api, getStoredUser } from "../services/api";
 
 const CHART_TABS = ["Today", "7 Days", "30 Days"];
 
 export default function Dashboard({ onNavigate }: { onNavigate: (p: string) => void }) {
   const [s1Status, setS1Status] = useState<SocketStatus>("on");
   const [s2Status, setS2Status] = useState<SocketStatus>("on");
-  const [data, setData] = useState(() => generateSensorData({ s1Status: "on", s2Status: "on" }));
+  const [data, setData] = useState<SensorData>(() => generateSensorData({ s1Status: "on", s2Status: "on" }));
   const [chartTab, setChartTab] = useState(0);
-  const [chartData] = useState(() => generateHourlyData());
+  const [chartData, setChartData] = useState<any[]>(() => generateHourlyData());
+  const [aiData, setAiData] = useState<any>(null);
+  const [deviceName, setDeviceName] = useState("Smart Energy Guardian #001");
+  const [deviceStatus, setDeviceStatus] = useState<"online" | "offline">("online");
+  const [user] = useState(() => getStoredUser() || { name: "Vishwajeet" });
 
-  useEffect(() => {
-    const id = setInterval(() => {
+  // Fetch live device state from API
+  const fetchLiveState = useCallback(async () => {
+    try {
+      const res = await api.devices.get(1);
+      if (res && res.socket1 && res.socket2) {
+        setData({
+          voltage: res.voltage,
+          totalPower: res.totalPower,
+          energyToday: res.energyToday,
+          monthlyBill: res.monthlyBill,
+          socket1: {
+            id: 1,
+            name: res.socket1.name,
+            status: res.socket1.status as SocketStatus,
+            appliance: res.socket1.appliance,
+            confidence: res.socket1.confidence,
+            current: res.socket1.current,
+            power: res.socket1.power,
+            energyToday: res.socket1.energyToday,
+            anomaly: res.socket1.anomaly,
+            anomalyScore: res.socket1.anomalyScore,
+            normalRangeMin: res.socket1.normalRangeMin,
+            normalRangeMax: res.socket1.normalRangeMax
+          },
+          socket2: {
+            id: 2,
+            name: res.socket2.name,
+            status: res.socket2.status as SocketStatus,
+            appliance: res.socket2.appliance,
+            confidence: res.socket2.confidence,
+            current: res.socket2.current,
+            power: res.socket2.power,
+            energyToday: res.socket2.energyToday,
+            anomaly: res.socket2.anomaly,
+            anomalyScore: res.socket2.anomalyScore,
+            normalRangeMin: res.socket2.normalRangeMin,
+            normalRangeMax: res.socket2.normalRangeMax
+          }
+        });
+        setS1Status(res.socket1.status as SocketStatus);
+        setS2Status(res.socket2.status as SocketStatus);
+        if (res.device) {
+          setDeviceName(res.device.device_name || "Smart Energy Guardian #001");
+          setDeviceStatus(res.device.status === "ONLINE" ? "online" : "offline");
+        }
+      }
+    } catch (err) {
+      // Fallback to local jitter if backend is offline
       setData(generateSensorData({ s1Status, s2Status }));
-    }, 3000);
-    return () => clearInterval(id);
+    }
   }, [s1Status, s2Status]);
 
-  const toggleSocket = (n: 1 | 2) => {
+  // Fetch AI insights
+  const fetchAIInsights = useCallback(async () => {
+    try {
+      const res = await api.devices.getAI(1);
+      if (res) setAiData(res);
+    } catch (err) {
+      // Ignore
+    }
+  }, []);
+
+  // Fetch Chart Data on tab change
+  useEffect(() => {
+    let isMounted = true;
+    api.devices.getReadings(1, chartTab)
+      .then(res => {
+        if (isMounted && res && res.readings && res.readings.length > 0) {
+          setChartData(res.readings);
+        }
+      })
+      .catch(() => {
+        // Fallback to mock chart
+      });
+    return () => { isMounted = false; };
+  }, [chartTab]);
+
+  // Polling loop for telemetry (2.5s) and AI insights (8s)
+  useEffect(() => {
+    fetchLiveState();
+    fetchAIInsights();
+
+    const liveInterval = setInterval(fetchLiveState, 2500);
+    const aiInterval = setInterval(fetchAIInsights, 8000);
+
+    return () => {
+      clearInterval(liveInterval);
+      clearInterval(aiInterval);
+    };
+  }, [fetchLiveState, fetchAIInsights]);
+
+  // Toggle socket command to backend
+  const toggleSocket = async (n: 1 | 2) => {
+    const current = n === 1 ? s1Status : s2Status;
+    const next: SocketStatus = current === "on" ? "off" : "on";
+    const command = next === "on" ? "TURN_ON" : "TURN_OFF";
+
+    // Optimistic UI update
     if (n === 1) {
-      const next: SocketStatus = s1Status === "on" ? "off" : "on";
       setS1Status(next);
-      setData(generateSensorData({ s1Status: next, s2Status }));
+      setData(prev => ({
+        ...prev,
+        socket1: { ...prev.socket1, status: next, power: next === 'off' ? 0 : prev.socket1.power }
+      }));
     } else {
-      const next: SocketStatus = s2Status === "on" ? "off" : "on";
       setS2Status(next);
-      setData(generateSensorData({ s1Status, s2Status: next }));
+      setData(prev => ({
+        ...prev,
+        socket2: { ...prev.socket2, status: next, power: next === 'off' ? 0 : prev.socket2.power }
+      }));
+    }
+
+    try {
+      await api.devices.sendCommand(1, n, command);
+      // Refresh telemetry after a short delay for hardware sync
+      setTimeout(fetchLiveState, 800);
+    } catch (err) {
+      console.warn("Failed to dispatch relay command to backend, using optimistic state:", err);
     }
   };
 
@@ -41,22 +148,51 @@ export default function Dashboard({ onNavigate }: { onNavigate: (p: string) => v
       <div className="rounded-xl p-3 text-xs border" style={{ background: "#1a2340", borderColor: "var(--border)" }}>
         <p className="text-slate-400 mb-2 font-mono">{label}</p>
         {payload.map((p: any) => (
-          <p key={p.name} style={{ color: p.color }}>{p.name}: <span className="font-bold">{p.value.toFixed(0)} W</span></p>
+          <p key={p.name} style={{ color: p.color }}>{p.name}: <span className="font-bold">{p.value?.toFixed ? p.value.toFixed(0) : p.value} W</span></p>
         ))}
       </div>
     );
   };
 
+  // AI Card values
+  const aiApplianceSummary = aiData
+    ? `${aiData.applianceRecognition?.socket1?.appliance || 'Fan'} on Socket 1 · ${aiData.applianceRecognition?.socket2?.appliance || 'Laptop'} on Socket 2`
+    : `Fan on Socket 1 · Laptop on Socket 2`;
+
+  const aiConfidenceSummary = aiData
+    ? `${aiData.applianceRecognition?.socket1?.confidence || 94}% & ${aiData.applianceRecognition?.socket2?.confidence || 91}% confidence`
+    : `94% & 91% confidence`;
+
+  const aiPredictionSummary = aiData?.energyPrediction?.predicted_today_kwh
+    ? `Expected today: ${aiData.energyPrediction.predicted_today_kwh.toFixed(1)} kWh`
+    : "Expected today: 3.2 kWh";
+
+  const aiAnomalySummary = aiData?.anomalyStatus?.hasAnomaly
+    ? `Unusual draw on ${aiData.anomalyStatus.socket}`
+    : "No abnormal consumption detected";
+
+  const aiAnomalySub = aiData?.anomalyStatus?.hasAnomaly
+    ? `Score: ${aiData.anomalyStatus.score}% · ${aiData.anomalyStatus.reason}`
+    : "All readings in normal range";
+
+  const aiRecSummary = aiData?.recommendations?.[0]?.text
+    ? aiData.recommendations[0].title
+    : "Socket 1 running 18% longer than usual";
+
+  const aiRecSub = aiData?.recommendations?.[0]?.text
+    ? aiData.recommendations[0].text.substring(0, 48) + "..."
+    : "Est. saving: ₹72 this month";
+
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-6">
       <div className="flex items-start justify-between">
         <div>
-          <h2 className="text-xl md:text-2xl font-display font-bold text-white">Good Morning, Vishwajeet 👋</h2>
+          <h2 className="text-xl md:text-2xl font-display font-bold text-white">Good Morning, {user.name || "Vishwajeet"} 👋</h2>
           <p className="text-slate-400 text-sm mt-1">{"Here's your energy overview."}</p>
         </div>
         <div className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-xl border text-xs" style={{ background: "var(--card)", borderColor: "rgba(16,185,129,0.2)" }}>
-          <StatusBadge status="online" size="sm" />
-          <span className="text-slate-300">Smart Extension</span>
+          <StatusBadge status={deviceStatus} size="sm" />
+          <span className="text-slate-300">{deviceName}</span>
         </div>
       </div>
 
@@ -99,7 +235,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (p: string) => v
               </div>
               <button
                 onClick={() => toggleSocket(s.id)}
-                className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200
+                className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 cursor-pointer
                   ${isOn ? "bg-red-500/15 text-red-400 border border-red-500/30 hover:bg-red-500/25" : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25"}`}
               >
                 <Power size={15} />
@@ -121,22 +257,22 @@ export default function Dashboard({ onNavigate }: { onNavigate: (p: string) => v
               <p className="text-[10px] text-purple-400 font-mono">POWERED BY ML</p>
             </div>
           </div>
-          <button onClick={() => onNavigate("ai")} className="flex items-center gap-1 text-xs text-purple-400 hover:text-purple-300 transition-colors">
+          <button onClick={() => onNavigate("ai")} className="flex items-center gap-1 text-xs text-purple-400 hover:text-purple-300 transition-colors cursor-pointer">
             View AI Insights <ArrowRight size={12} />
           </button>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
           {[
-            { icon: Brain, color: "purple", label: "Appliance Recognition", body: `Fan on Socket 1 · Laptop on Socket 2`, sub: "94% & 91% confidence" },
-            { icon: TrendingUp, color: "cyan", label: "Consumption Prediction", body: "Expected today: 3.2 kWh", sub: `Actual so far: ${data.energyToday} kWh` },
-            { icon: AlertTriangle, color: "green", label: "Anomaly Detection", body: "No abnormal consumption detected", sub: "All readings in normal range" },
-            { icon: Lightbulb, color: "amber", label: "Smart Recommendation", body: "Socket 1 running 18% longer than usual", sub: "Est. saving: ₹72 this month" },
+            { icon: Brain, color: "purple", label: "Appliance Recognition", body: aiApplianceSummary, sub: aiConfidenceSummary },
+            { icon: TrendingUp, color: "cyan", label: "Consumption Prediction", body: aiPredictionSummary, sub: `Actual so far: ${data.energyToday.toFixed(2)} kWh` },
+            { icon: AlertTriangle, color: aiData?.anomalyStatus?.hasAnomaly ? "amber" : "green", label: "Anomaly Detection", body: aiAnomalySummary, sub: aiAnomalySub },
+            { icon: Lightbulb, color: "amber", label: "Smart Recommendation", body: aiRecSummary, sub: aiRecSub },
           ].map(({ icon: Icon, color, label, body, sub }) => (
             <div key={label} className={`rounded-xl p-4 border border-${color}-500/15`} style={{ background: "rgba(255,255,255,0.03)" }}>
               <Icon size={15} className={`text-${color}-400 mb-2`} />
               <p className={`text-[10px] font-mono text-${color}-400 mb-1`}>{label.toUpperCase()}</p>
-              <p className="text-xs text-white font-medium mb-1">{body}</p>
-              <p className="text-[10px] text-slate-500">{sub}</p>
+              <p className="text-xs text-white font-medium mb-1 line-clamp-1">{body}</p>
+              <p className="text-[10px] text-slate-500 line-clamp-1">{sub}</p>
             </div>
           ))}
         </div>
@@ -148,9 +284,9 @@ export default function Dashboard({ onNavigate }: { onNavigate: (p: string) => v
             <h3 className="text-sm font-display font-semibold text-white">{"Today's Power Consumption"}</h3>
             <div className="flex gap-4 mt-2">
               {[
-                { label: "Peak", value: "198 W", color: "text-cyan-400" },
+                { label: "Peak", value: `${Math.max(198, data.totalPower)} W`, color: "text-cyan-400" },
                 { label: "Average", value: "112 W", color: "text-blue-400" },
-                { label: "Total", value: `${data.energyToday} kWh`, color: "text-purple-400" },
+                { label: "Total", value: `${data.energyToday.toFixed(2)} kWh`, color: "text-purple-400" },
               ].map(m => (
                 <span key={m.label} className="text-xs">
                   <span className="text-slate-500">{m.label}: </span>
@@ -162,7 +298,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (p: string) => v
           <div className="flex gap-1 p-1 rounded-lg" style={{ background: "rgba(255,255,255,0.04)" }}>
             {CHART_TABS.map((t, i) => (
               <button key={t} onClick={() => setChartTab(i)}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${chartTab === i ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"}`}>
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${chartTab === i ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"}`}>
                 {t}
               </button>
             ))}

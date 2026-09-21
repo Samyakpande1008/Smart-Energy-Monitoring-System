@@ -1,9 +1,22 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Plug, ChevronRight, Clock, Zap, Activity, X } from "lucide-react";
 import StatusBadge from "../components/StatusBadge";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import { api } from "../services/api";
 
-const appliances = [
+interface ApplianceItem {
+  id: number;
+  name: string;
+  socket: string;
+  power: number;
+  energy: number;
+  confidence: number;
+  status: "on" | "off";
+  avgPower: number;
+  typicalHours: string;
+}
+
+const DEFAULT_APPLIANCES: ApplianceItem[] = [
   { id: 1, name: "Fan", socket: "Socket 1", power: 105, energy: 1.42, confidence: 94, status: "on", avgPower: 92, typicalHours: "6–10h/day" },
   { id: 2, name: "Laptop", socket: "Socket 2", power: 67, energy: 0.92, confidence: 91, status: "on", avgPower: 68, typicalHours: "4–8h/day" },
 ];
@@ -13,7 +26,53 @@ const patternData = Array.from({ length: 12 }, (_, i) => ({
 }));
 
 export default function Appliances() {
-  const [selected, setSelected] = useState<typeof appliances[0] | null>(null);
+  const [appliancesList, setAppliancesList] = useState<ApplianceItem[]>(DEFAULT_APPLIANCES);
+  const [selected, setSelected] = useState<ApplianceItem | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchAppliances = async () => {
+      try {
+        const res = await api.devices.get(1);
+        if (isMounted && res && res.socket1 && res.socket2) {
+          const list: ApplianceItem[] = [
+            {
+              id: 1,
+              name: res.socket1.appliance || "Fan",
+              socket: "Socket 1",
+              power: res.socket1.power,
+              energy: res.socket1.energyToday,
+              confidence: res.socket1.confidence || 94,
+              status: res.socket1.status as "on" | "off",
+              avgPower: res.socket1.power > 0 ? res.socket1.power : 92,
+              typicalHours: "6–10h/day"
+            },
+            {
+              id: 2,
+              name: res.socket2.appliance || "Laptop",
+              socket: "Socket 2",
+              power: res.socket2.power,
+              energy: res.socket2.energyToday,
+              confidence: res.socket2.confidence || 91,
+              status: res.socket2.status as "on" | "off",
+              avgPower: res.socket2.power > 0 ? res.socket2.power : 68,
+              typicalHours: "4–8h/day"
+            }
+          ];
+          setAppliancesList(list);
+        }
+      } catch (err) {
+        // Fallback to default list
+      }
+    };
+
+    fetchAppliances();
+    const interval = setInterval(fetchAppliances, 4000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-6">
@@ -33,7 +92,7 @@ export default function Appliances() {
               </tr>
             </thead>
             <tbody>
-              {appliances.map((a) => (
+              {appliancesList.map((a) => (
                 <tr key={a.id} className="border-b hover:bg-white/3 transition-colors" style={{ borderColor: "var(--border)" }}>
                   <td className="px-4 py-4">
                     <div className="flex items-center gap-3">
@@ -49,14 +108,14 @@ export default function Appliances() {
                   <td className="px-4 py-4">
                     <div className="flex items-center gap-2">
                       <div className="w-16 h-1.5 rounded-full bg-white/5">
-                        <div className="h-full rounded-full bg-purple-500" style={{ width: `${a.confidence}%` }} />
+                        <div className="h-full rounded-full bg-purple-500 transition-all duration-500" style={{ width: `${a.confidence}%` }} />
                       </div>
                       <span className="text-xs font-mono text-purple-400">{a.confidence}%</span>
                     </div>
                   </td>
-                  <td className="px-4 py-4"><StatusBadge status={a.status as any} size="sm" /></td>
+                  <td className="px-4 py-4"><StatusBadge status={a.status} size="sm" /></td>
                   <td className="px-4 py-4">
-                    <button onClick={() => setSelected(a)} className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors">
+                    <button onClick={() => setSelected(a)} className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors cursor-pointer">
                       Details <ChevronRight size={12} />
                     </button>
                   </td>
@@ -75,7 +134,7 @@ export default function Appliances() {
                 <h3 className="text-lg font-display font-bold text-white">{selected.name}</h3>
                 <p className="text-xs text-slate-400">{selected.socket}</p>
               </div>
-              <button onClick={() => setSelected(null)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setSelected(null)} className="text-slate-400 hover:text-white cursor-pointer">
                 <X size={18} />
               </button>
             </div>
@@ -112,7 +171,7 @@ export default function Appliances() {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-xs text-slate-400">AI Confidence: <span className="text-purple-400 font-mono font-bold">{selected.confidence}%</span></span>
-              <StatusBadge status={selected.status as any} size="sm" />
+              <StatusBadge status={selected.status} size="sm" />
             </div>
           </div>
         </div>
